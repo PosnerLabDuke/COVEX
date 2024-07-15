@@ -1,0 +1,389 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2761
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica-Bold;\f1\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+\margl1440\margr1440\vieww19900\viewh14680\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\b\fs24 \cf0 # R code for assessing relationship between subcortical volumes and COVEX questionnaire\
+# Dataframe is called HMinds 
+\f1\b0 \
+\
+# Load necessary libraries\
+if (!requireNamespace("car", quietly = TRUE)) \{\
+  install.packages("car")\
+\}\
+library(car)\
+if (!requireNamespace("broom", quietly = TRUE)) \{\
+  install.packages("broom")\
+\}\
+library(broom)\
+\
+# Calculate the mean of PMA excluding NA values \'97 mean interpolation\
+mean_pma <- mean(HMinds$PMA, na.rm = TRUE)\
+\
+# Impute NaN values in PMA with the mean\
+HMinds$PMA[is.na(HMinds$PMA)] <- mean_pma\
+\
+# Initialize an empty list to store results, sample sizes, and VIF values\
+results <- list()\
+sample_sizes <- numeric(length(dependent_vars))  # Initialize vector to store sample sizes\
+vif_values <- vector("list", length(dependent_vars))  # Initialize list to store VIF values\
+\
+# Get the names of dependent variables from the HMinds dataset\
+dependent_vars <- names(HMinds)[5:12]\
+\
+# Iterate over each dependent variable\
+for (i in seq_along(dependent_vars)) \{\
+  dep_var <- dependent_vars[i]\
+  # Construct the linear model formula\
+  formula <- as.formula(paste(dep_var, "~ PMA + Sex + TBV + Infection_z + Financial_z + MHealth_z"))\
+  \
+  # Fit the linear model\
+  model <- lm(formula, data = HMinds)\
+  \
+  # Store the summary of the model in the results list using the dependent variable name\
+  results[[dep_var]] <- summary(model)\
+  \
+  # Store the sample size\
+  sample_sizes[i] <- nobs(model)\
+  \
+  # Calculate VIF values for the predictors\
+  vif_values[[dep_var]] <- car::vif(model)\
+  \
+  # Print VIF values\
+  cat("\\nVariance Inflation Factors (VIF) for", dep_var, "model:\\n")\
+  print(vif_values[[dep_var]])\
+\}\
+\
+# Print sample sizes\
+cat("\\nSample sizes:\\n")\
+print(sample_sizes)\
+\
+# Obtain tidy results for each model\
+tidy_results <- lapply(results, tidy)\
+\
+# Extract p-values for the "Financial_z", "MHealth_z", and "Infection_z" terms\
+Financial_p_values <- sapply(tidy_results, function(x) x[x$term == "Financial_z", "p.value"])\
+Mhealth_p_values <- sapply(tidy_results, function(x) x[x$term == "MHealth_z", "p.value"])\
+Infection_p_values <- sapply(tidy_results, function(x) x[x$term == "Infection_z", "p.value"])\
+\
+# Correct p-values using the Benjamini-Hochberg (BH) method\
+adjusted_p_values_Financial <- p.adjust(Financial_p_values, method = "BH")\
+adjusted_p_values_MHealth <- p.adjust(Mhealth_p_values, method = "BH")\
+adjusted_p_values_Infection <- p.adjust(Infection_p_values, method = "BH")\
+\
+# Print adjusted p-values with the names of dependent variables\
+cat("\\nAdjusted p-values for Financial:\\n")\
+for (i in seq_along(dependent_vars)) \{\
+  cat(dependent_vars[i], ": ", adjusted_p_values_Financial[i], "\\n")\
+\}\
+\
+cat("\\nAdjusted p-values for MHealth:\\n")\
+for (i in seq_along(dependent_vars)) \{\
+  cat(dependent_vars[i], ": ", adjusted_p_values_MHealth[i], "\\n")\
+\}\
+\
+cat("\\nAdjusted p-values for Infection:\\n")\
+for (i in seq_along(dependent_vars)) \{\
+  cat(dependent_vars[i], ": ", adjusted_p_values_Infection[i], "\\n")\
+\}\
+\
+
+\f0\b # Robust regression for the 2 subcortical volumes that showed FDR corrected statistically significant results
+\f1\b0 \
+\
+# Install necessary packages (only need to do this once)\
+install.packages("MASS")\
+install.packages("lmtest")\
+install.packages("sandwich")\
+\
+# Load the necessary packages\
+library(MASS)\
+library(lmtest)\
+library(sandwich)\
+\
+# Fit robust regression model for Left Hippocampus\
+model_robust_LHippo <- rlm(LeftHippocampus ~ PMA + Sex + TBV + Infection_z + Financial_z + MHealth_z, data = HMinds)\
+robust_se_LHippo <- coeftest(model_robust_LHippo, vcov = vcovHC(model_robust_LHippo, type = "HC1"))\
+print(robust_se_LHippo)\
+\
+# Fit robust regression model for Right Hippocampus\
+model_robust_RHippo <- rlm(RightHippocampus ~ PMA + Sex + TBV + Infection_z + Financial_z + MHealth_z, data = HMinds)\
+robust_se_RHippo <- coeftest(model_robust_RHippo, vcov = vcovHC(model_robust_RHippo, type = "HC1"))\
+print(robust_se_RHippo)\
+\
+\pard\pardeftab720\partightenfactor0
+\cf0 \
+
+\f0\b # Partial correlations between hippocampus volumes and behavioral outcomes with bootstrapped CI
+\f1\b0 \
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 # Check if packages are already installed, if not, install them\
+if (!requireNamespace("ppcor", quietly = TRUE)) \{\
+  install.packages("ppcor")\
+\}\
+if (!requireNamespace("boot", quietly = TRUE)) \{\
+  install.packages("boot")\
+\}\
+\
+# Load necessary packages\
+library(ppcor)\
+library(boot)\
+\
+# Assuming HMinds_T2_Behav is defined or imported\
+data <- HMinds_T2_Behav[, c("LeftHippocampus", "RightHippocampus", "Gross.Motor", "Sex")]  # Adjust column names here\
+\
+# Function to compute partial correlation\
+partial_corr <- function(data, indices, var1, var2) \{\
+  data_boot <- data[indices, ]\
+  pcor_result <- pcor(data_boot[, c(var1, var2)], method = "pearson")\
+  return(pcor_result$estimate[1, 2])  # Return the partial correlation coefficient\
+\}\
+\
+# Calculate partial correlation and p-value without bootstrapping for LeftHippocampus\
+partial_correlation_left <- pcor(data[, c("LeftHippocampus", "Gross.Motor", "Sex")], method = "pearson")\
+print("Partial Correlation without Bootstrapping - LeftHippocampus:")\
+print(partial_correlation_left$estimate[1, 2])  # Print the partial correlation coefficient\
+print("P-value:")\
+print(partial_correlation_left$p[1, 2])  # Print the p-value\
+\
+# Perform bootstrapping for LeftHippocampus\
+boot_result_left <- boot(data[, c("LeftHippocampus", "Gross.Motor", "Sex")], statistic = partial_corr, R = 1000, var1 = "LeftHippocampus", var2 = "Gross.Motor")\
+boot_ci_left <- boot.ci(boot_result_left, type = "basic")$basic\
+\
+# Print the bootstrapping results for LeftHippocampus\
+cat("\\nBootstrapped 95% CI - LeftHippocampus:", boot_ci_left[4], "-", boot_ci_left[5], "\\n")  # Print the 95% confidence interval\
+\
+# Calculate partial correlation and p-value without bootstrapping for RightHippocampus\
+partial_correlation_right <- pcor(data[, c("RightHippocampus", "Gross.Motor", "Sex")], method = "pearson")\
+print("\\nPartial Correlation without Bootstrapping - RightHippocampus:")\
+print(partial_correlation_right$estimate[1, 2])  # Print the partial correlation coefficient\
+print("P-value:")\
+print(partial_correlation_right$p[1, 2])  # Print the p-value\
+\
+# Perform bootstrapping for RightHippocampus\
+boot_result_right <- boot(data[, c("RightHippocampus", "Gross.Motor", "Sex")], statistic = partial_corr, R = 1000, var1 = "RightHippocampus", var2 = "Gross.Motor")\
+boot_ci_right <- boot.ci(boot_result_right, type = "basic")$basic\
+\
+# Print the bootstrapping results for RightHippocampus\
+cat("\\nBootstrapped 95% CI - RightHippocampus:", boot_ci_right[4], "-", boot_ci_right[5], "\\n")  # Print the 95% confidence interval\
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\b \cf2 # Separate linear models for each of the 32 possible connections\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f1\b0 \cf0 \
+# Define the range of column numbers for dependent variables\
+dependent_cols <- 15:46\
+\
+# Extract column names based on the range\
+dependent_vars <- colnames(HMinds_Conn)[dependent_cols]\
+\
+# Initialize an empty list to store the models and summaries\
+models <- list()\
+summaries <- list()\
+\
+# Fit models using a loop\
+for (dep_var in dependent_vars) \{\
+  formula <- as.formula(paste(dep_var, "~ PMA + Sex + Infection_z + Financial_z + MHealth_z"))\
+  model_name <- paste("model", dep_var, sep = "_")\
+  \
+  # Fit the model\
+  models[[model_name]] <- lm(formula, data = HMinds_Conn)\
+  \
+  # Store the summary of the model\
+  summaries[[model_name]] <- summary(models[[model_name]])\
+  \
+  # Print the summary for each model\
+  cat("Summary for", model_name, ":\\n")\
+  print(summaries[[model_name]])\
+  cat("\\n")\
+\}\
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\b \cf2 #Models with interaction terms - limited to hippocampus connectivity b/c of significant finding with structural MRI\
+#Model for Sex * Financial_z interaction
+\f1\b0 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 \
+# Model includes Sex * Financial_z interaction\
+\
+# List of dependent variables\
+dependent_vars <- c("LHip_LLatOrb", "LHip_LMedOrb", "LHip_LRosAntCing", "LHip_LParOrb",\
+                    "RHip_RLatOrb", "RHip_RMedOrb", "RHip_RRosAntCing", "RHip_RParOrb")\
+\
+# Initialize an empty list to store the models\
+models <- list()\
+\
+# Fit models using a loop\
+for (dep_var in dependent_vars) \{\
+  formula <- as.formula(paste(dep_var, "~ PMA + Sex + Infection_z + Financial_z + MHealth_z + Sex * Financial_z"))\
+  model_name <- paste("model", dep_var, sep = "_")\
+  models[[model_name]] <- lm(formula, data = HMinds_Conn)\
+\}\
+\
+# Function to extract p-value for Sex:Financial_z interaction term\
+extract_p_value <- function(model) \{\
+  coef_names <- names(coef(model))\
+  interaction_term <- "Sex:Financial_z"\
+  if (interaction_term %in% coef_names) \{\
+    return(summary(model)$coefficients[interaction_term, "Pr(>|t|)"])\
+  \} else \{\
+    return(NA)  # Return NA if interaction term is not present\
+  \}\
+\}\
+\
+# Summarize models and extract p-values for the interaction term (Sex*Financial_z)\
+p_values <- sapply(models, extract_p_value)\
+\
+# Perform FDR correction\
+p_values_fdr <- p.adjust(p_values, method = "fdr")\
+\
+# Print the p-values and the FDR corrected p-values\
+print(p_values)\
+print(p_values_fdr)\
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\b \cf2 #Model for Sex * MHealth_z interaction
+\f1\b0 \cf0 \
+\
+# Model includes Sex * MHealth_z interaction\
+\
+# List of dependent variables\
+dependent_vars <- c("LHip_LLatOrb", "LHip_LMedOrb", "LHip_LRosAntCing", "LHip_LParOrb",\
+                    "RHip_RLatOrb", "RHip_RMedOrb", "RHip_RRosAntCing", "RHip_RParOrb")\
+\
+# Initialize an empty list to store the models\
+models <- list()\
+\
+# Fit models using a loop\
+for (dep_var in dependent_vars) \{\
+  # Create formula for the model\
+  formula <- as.formula(paste(dep_var, "~ PMA + Sex + Infection_z + Financial_z + MHealth_z + Sex * MHealth_z"))\
+  \
+  # Create a name for the model and store the fitted model in the list\
+  model_name <- paste("model", dep_var, sep = "_")\
+  models[[model_name]] <- lm(formula, data = HMinds_Conn)\
+\}\
+\
+# Function to extract p-value for Sex:MHealth_z interaction term\
+extract_p_value <- function(model) \{\
+  coef_names <- names(coef(model))\
+  interaction_term <- "Sex:MHealth_z"\
+  if (interaction_term %in% coef_names) \{\
+    return(summary(model)$coefficients[interaction_term, "Pr(>|t|)"])\
+  \} else \{\
+    return(NA)  # Return NA if interaction term is not present\
+  \}\
+\}\
+\
+# Summarize models and extract p-values for the interaction term (Sex*MHealth_z)\
+p_values <- sapply(models, extract_p_value)\
+\
+# Perform FDR correction\
+p_values_fdr <- p.adjust(p_values, method = "fdr")\
+\
+# Print the p-values and the FDR corrected p-values\
+print(p_values)\
+print(p_values_fdr)\
+\
+\
+
+\f0\b \cf2 #Model for Sex * Infection_z interaction
+\f1\b0 \cf0 \
+\
+# Model includes Sex * Infection_z interaction\
+\
+# List of dependent variables\
+dependent_vars <- c("LHip_LLatOrb", "LHip_LMedOrb", "LHip_LRosAntCing", "LHip_LParOrb",\
+                    "RHip_RLatOrb", "RHip_RMedOrb", "RHip_RRosAntCing", "RHip_RParOrb")\
+\
+# Initialize an empty list to store the models\
+models <- list()\
+\
+# Fit models using a loop\
+for (dep_var in dependent_vars) \{\
+  # Create formula for the model\
+  formula <- as.formula(paste(dep_var, "~ PMA + Sex + Infection_z + Financial_z + MHealth_z + Sex * Infection_z"))\
+  \
+  # Create a name for the model and store the fitted model in the list\
+  model_name <- paste("model", dep_var, sep = "_")\
+  models[[model_name]] <- lm(formula, data = HMinds_Conn)\
+\}\
+\
+# Function to extract p-value for Sex:Infection_z interaction term\
+extract_p_value <- function(model) \{\
+  coef_names <- names(coef(model))\
+  interaction_term <- "Sex:Infection_z"\
+  if (interaction_term %in% coef_names) \{\
+    return(summary(model)$coefficients[interaction_term, "Pr(>|t|)"])\
+  \} else \{\
+    return(NA)  # Return NA if interaction term is not present\
+  \}\
+\}\
+\
+# Summarize models and extract p-values for the interaction term (Sex*Infection_z)\
+p_values <- sapply(models, extract_p_value)\
+\
+# Perform FDR correction\
+p_values_fdr <- p.adjust(p_values, method = "fdr")\
+\
+# Print the p-values and the FDR corrected p-values\
+print(p_values)\
+print(p_values_fdr)\
+\
+
+\f0\b \cf2 # Robust Regression for connections with significant p-values \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f1\b0 \cf0 \
+# Check if MASS package is loaded, if not, load it\
+if (!requireNamespace("MASS", quietly = TRUE)) \{\
+  install.packages("MASS")\
+\}\
+library(MASS)\
+\
+# Check if lmtest package is loaded, if not, load it\
+if (!requireNamespace("lmtest", quietly = TRUE)) \{\
+  install.packages("lmtest")\
+\}\
+library(lmtest)\
+\
+# Fit the robust linear model for RHip_RRosAntCing\
+model_RHip_RRosAntCing_robust <- rlm(RHip_RRosAntCing ~ PMA + Sex + Infection_z + Financial_z + MHealth_z + Sex * Financial_z, data = HMinds_Conn)\
+\
+# Summary of the model (does not include p-values)\
+summary(model_RHip_RRosAntCing_robust)\
+\
+# Get the coefficients and p-values\
+coeftest(model_RHip_RRosAntCing_robust)\
+\
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\b \cf2 # To examine the nature of the Financial*Sex interaction suing separate linear models for males and females\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f1\b0 \cf0 \
+# Subset for Sex = 0\
+subset_sex0 <- HMinds_Conn[HMinds_Conn$Sex == 0, ]\
+\
+# Fit the model for Sex = 0\
+model_sex0 <- lm(RHip_RRosAntCing ~ PMA + Infection + Financial + MHealth , data = subset_sex0)\
+\
+# View summary of the model for Sex = 0\
+summary(model_sex0)\
+\
+# Subset for Sex = 1\
+subset_sex1 <- HMinds_Conn[HMinds_Conn$Sex == 1, ]\
+\
+# Fit the model for Sex = 1\
+model_sex1 <- lm(RHip_RRosAntCing ~ PMA + Infection + Financial + MHealth, data = subset_sex1)\
+\
+# View summary of the model for Sex = 1\
+summary(model_sex1)}
